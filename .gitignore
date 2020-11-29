@@ -1,7 +1,12 @@
 *.csv
 *.pdf
 .DS_Store
-
+*.aux
+*.log
+*.out
+*.tex
+*.toc
+*.zip
 
 # History files
 .Rhistory
