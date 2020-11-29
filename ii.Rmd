@@ -1,0 +1,351 @@
+---
+title: Assignment ii
+author: 
+  - Abdulrahman Aljanaahi
+  - Muna Ahli
+  - Mohammad Shehab
+date: \today
+output:
+    pdf_document:
+        toc: true
+        toc_depth: 3
+        latex_engine: xelatex
+    html_document:
+    df_print: paged
+header-includes:
+  \usepackage{booktabs}
+---
+
+```{r global-options, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width = 12,
+  fig.height = 8,
+  fig.path = 'Figs/',
+  echo = TRUE ,
+  warning = FALSE,
+  message = FALSE
+)
+
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(
+  chunk = function(x, options) {
+    x <- def.chunk.hook(x, options)
+    ifelse(
+      options$size != "normalsize",
+      paste0("\\", options$size, "\n\n", x, "\n\n \\normalsize"),
+      x
+    )
+  }
+)
+```
+
+# Introduction
+
+Launched in 2003, New York City’s non-emergency complaint hotline (311) calls have been made available as a dataset on NYC OpenData portal.  The portal provides useful intelligence and the ability to detect patterns which would be difficult to understand without geospatial data.
+
+### Abstraction
+
+**NYC Open Data** is a tool provided by the New York City government as part of an initiative for the city to be more transparent in their operations. Through the website, various agencies have made their data public, from the NYPD to the Fire Department, in order to "improve the accessibility, transparency, and accountability of City government" (NYC Open Data Website). From 311 calls to housing data, the NYC Open Data initiative has made it possible for data scientists to create analyses and tools that allow the public to understand how NYC is run day to day.
+
+### Goals and Outcomes.
+
+For this project, we are going to investigate the NYC 311 dataset, present a sample as well as a data dictionary,and explore the data through several visualizations.
+
+# Getting Started
+
+## Configuration
+
+```{r configuration}
+# This variable indicates that we are running in a development mode.
+config.isDev<- F
+
+# Number of records to read in case you are running in a development mode.
+config.maxRead <- 5000
+
+# denotes the name of the data file.
+config.fileName <- "311.csv"
+```
+
+## Initialization
+
+We want to make sure that all the `packages` we are using are installed and loaded properly.
+
+```{r init }
+## We check if the library has already been loaded.
+packages <-
+  c("tidyverse", 
+    "data.table", 
+    "xtable", 
+    "dataMeta", 
+    "stringr",
+    "knitr",
+    "kableExtra",
+    "visdat",
+    "ggmap",
+    "gmodels")
+
+install.packages(setdiff(packages, rownames(installed.packages()))) 
+for (lib in packages) 
+  library(lib, character.only = TRUE)
+
+## simple flag to see if we are running on a development machine.
+```
+
+
+### Loading The Data Set
+
+In this section we will load the data using `fread()` function, we will also clean the column names and replace `spaces` with `` to create a [PascalCase](https://techterms.com/definition/pascalcase#:~:text=PascalCase%20is%20a%20naming%20convention,in%20PascalCase%20is%20always%20capitalized.) naming convention
+
+```{r reading}
+## Read the dataSet
+if (config.isDev) {
+  print(paste0("DEBUG: Reducing the dataset size to", config.maxRead))
+  dataSet <- fread(config.fileName, nrows = config.maxRead)
+} else
+  dataSet<-fread(config.fileName)
+
+## Convert the column names to PascalCase
+names(dataSet)<- names(dataSet) %>%stringr::str_replace_all("\\s", "")
+
+## display the structure
+colnames(dataSet)
+```
+
+## Data Selection
+
+In this section we reduce our dataset and only select the variables that we are going to work with.
+
+```{r data-selection}
+dataSet1 <- dataSet %>%
+  # for some reason which i did not get much time
+  # to dive in to
+  # some variables were getting negative values.
+  # I suspect it's related to AM/PM. Although i have changed the time from 12
+  # to 24.
+  mutate(ResolutionTime = as.double(abs(difftime(
+    as.ITime(ClosedDate, format = "%m/%d/%Y %I:%M:%S %p"),
+    as.ITime(CreatedDate, format = "%m/%d/%Y %I:%M:%S %p"),
+    units = "mins"
+  )))) %>%
+  select(
+    CreatedDate,
+    ClosedDate,
+    ResolutionTime,
+    Agency,
+    ComplaintType,
+    Descriptor,
+    IncidentZip,
+    Status,
+    Borough,
+    Longitude,
+    Latitude
+  )
+
+head(dataSet1,  1)
+```
+
+## Data Dictionary
+
+```{r data-dictionary}
+
+variableDescriptors <-
+  c(
+    "Date SR was created",
+    "Date SR was closed by responding agency",
+    "Time taken to close the incident",
+    "Acronym of responding City Government Agency",
+    "This is the first level of a hierarchy identifying the topic of the incident or condition. Complaint Type may have a corresponding Descriptor (below) or may stand alone.",
+    "This is associated to the Complaint Type, and provides further detail on the incident or condition. Descriptor values are dependent on the Complaint Type, and are not always required in SR.",
+    "Incident location zip code, provided by geo validation.",
+    "Status of SR submitted",
+    "Provided by the submitter and confirmed by geovalidation.",
+    "Geocoordinate Longitude",
+    "Geocoordinate Latitude"
+  )
+
+df<- as.data.frame(dataSet1)
+
+#0: for those variables that have options that can be portrayed as a range of #values. For example, age or dates or any categorical factors that the user does #not want to list out (NA values will be maintained).
+#1: for those variables that have options that need to be listed and/or #described later on.
+variableTypes = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+dataLinker <-
+  build_linker(df,
+               variable_description = variableDescriptors,
+               variable_type = variableTypes)
+
+dataDictionary <-
+  build_dict(
+    my.data = df,
+    linker = dataLinker,
+    option_description = NULL,
+    prompt_varopts = F
+  )
+
+## draw a stylish table 
+head(dataDictionary, 100) %>%
+  kbl(caption = "NYC 311 Data Dictionary", 
+      col.names = c("Variable", "Description", "Options"),
+      align=c("l",rep("r",0))) %>%
+  kable_paper(full_width = FALSE) %>%
+  column_spec(1,width = "1.4in") %>%
+  column_spec(2,width = "3in") %>%
+  column_spec(3,width = "2.5in") %>%
+  footnote(c("Source; 100 Observations",
+             "NYC Data Set with 100 Observations"))
+```
+
+# Priliminary Exploration
+
+## Data Completion
+
+In this section we check if the dataset that we have is ready for processing and if it's completed or any NA's are available and whats the percentage of both.
+
+```{r completion status}
+vis_miss(df, warn_large_data = F)
+```
+## Clean Missing Records
+
+```{r data-cleaning}
+## I will replace all the NA's with the mean 
+df[is.na(df[,3]), 3]<-mean(df[,3], na.rm = TRUE)
+
+## display the summary
+summary(df$ResolutionTime)
+```
+
+\textcolor{green}{Great!} our data is ready to start visualization and exploring our dataset.
+
+## Data Completion (2nd Iteration)
+
+```{r data-readiness second iteration}
+vis_miss(df, warn_large_data = F)
+```
+
+# Exploration by visualization
+
+### How is the data distributed?
+
+```{r boxblot, size='footnotesize', results="asis"}
+ggplot(
+  data = df,
+  mapping = aes(x = ResolutionTime),
+  horizontal = T,
+) +
+  labs(x = "Resolution Time", title="Time to close the service request") +
+  geom_boxplot()
+```
+
+We notice that 75% of the incident where resolved in less than ~400 minutes which is **6.6 hours**
+
+### Finding the complaint type of the outliers
+
+In this section we find the complaint types of the upper limit of the outliers.
+
+```{r visualization, fig.width = 8}
+s <- summary(df$ResolutionTime)
+upperLimit <- s[5] + 1.5 * (s[5] - s[2])
+
+upperDf <- df %>% filter(ResolutionTime > upperLimit)
+
+ggplot(upperDf, aes(ComplaintType)) +
+  geom_histogram(stat = "count") +
+  labs(x = "Complaint Type", y = "Service Requests") +
+  coord_flip() + theme_bw()
+```
+
+Looks like `Animal in a Park` got the most out of these complaint types.
+
+### Whats the most complaint types?
+
+```{r top 50 complaint types, fig.width=10}
+ggplot(subset(
+  df,
+  ComplaintType %in% count(df, ComplaintType, sort = T)[1:50, ]$ComplaintType
+),
+aes(ComplaintType)) +
+  geom_histogram(stat = "count", 
+                 col="red", 
+                 aes(fill=..count..)) +
+  labs(x = "Complaint Type", y = "Service Requests")+
+  coord_flip() + theme_bw() + scale_fill_gradient("Count", low="green", high="red")
+```
+
+### Number of requests per status of the request through a simple bar plot.
+```{r ggplot, fig.width=10}
+options(dplyr.summarise.inform = FALSE)
+
+explore1 <-df %>%
+  group_by(Status) %>%
+    summarize(count=n()) %>%
+    filter(Status == "Open"|Status == "Assigned"|Status == "Pending"|Status == "Closed")
+
+
+ggplot(explore1,aes(x=Status,y=count,fill=Status))+
+  geom_bar(stat="identity") + 
+  scale_fill_manual(values = c("skyblue","royalblue","blue","navy")) +
+  theme(legend.title = element_blank(),legend.position = "none") +
+  labs(title ="Total Requests per Status", x = "Status", y = "Number of Requests")
+```
+
+## Number of requests containing a Street Condition or a Street Light Condition complaint per each Bouruough.
+
+```{r plotting-ggplot}
+explore2 <-df %>%
+  group_by(Borough,ComplaintType) %>%
+  summarize(count=n()) %>%
+  filter( Borough!="Unspecified" & (ComplaintType=="Street Condition" | ComplaintType=="Street Light Condition"))
+
+
+ggplot(explore2,aes(x=ComplaintType,y=count,group = ComplaintType, fill = ComplaintType)) +
+  geom_bar(stat="identity") +
+  facet_grid(. ~ Borough) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), axis.ticks.x=element_blank()) +
+  labs(title ="Number of Street or Street Light Condition Requests per Borough", x = "Borough", y = "Number of Requests")
+```
+
+## Most common complaint types by borough and status
+```{r}
+dataset_qckfilt <-
+  subset(df,
+         ComplaintType %in% count(df, ComplaintType, sort = T)[1:50, ]$ComplaintType)
+nrow(dataset_qckfilt)
+
+dataset_qckfilt <-
+  dataset_qckfilt %>% select(ComplaintType, Borough, Status)
+ggplot(dataset_qckfilt, aes(x = Status, y = ComplaintType)) +
+  geom_point() +
+  geom_count() +
+  facet_wrap( ~ Borough)
+```
+
+### Cross table of Three agencies per each request status.
+```{r cross-table}
+explore3 <- df %>%
+  filter(Agency == "NYPD" | Agency == "DOF" | Agency == "3-1-1")
+explore3_limited <- select(explore3, Status, Agency)
+CrossTable(explore3_limited$Status, explore3_limited$Agency, format = "SPSS", expected = T)
+```
+
+### Where are the complaints which took more than 16 hours concentrated ?
+```{r 50 - concerns}
+explore4<-dataSet1%>%filter(ResolutionTime > 1000)
+qmplot(Longitude, Latitude, data = explore4, colour = I('red'), size = I(3), darken = .3)+ facet_wrap(~ Agency)
+```
+
+
+# Conclusion
+
+In this project, based on all the analyzes carried out, the NYC311 Program is a very common and reliable source and platform for NYC communities to raise awareness among local agencies and public service providers on various issues of interest and well-being to society. 
+
+We started the project by installing the needed packages such as ‘tidyverse’, ‘ggmap’, etc. The next step was reading the dataset and converting the column names to PascalCase. In addition, we displayed the structure of the column names. 
+Then, we moved to data selection part, where we reduced our dataset and selected only the variables that we wanted to work with. 
+
+Afterwards, we described the data by showing both sample and data dictionary. The data dictionary included description and list of possible attributes. 
+
+The next step was Preliminary Exploration. In this part, we check if the dataset that we have is ready for processing and whether it is completed or it has any NA’s, in addition to checking the percentage of both missing and present data. Then, we cleaned the missing records by replacing all the NA’s with the mean.
+
+Furthermore, we moved to data exploration step in order to observe how the data is distributed. Initially, we generated a box plot to the time to close the service request. We noticed that 75% of the incidents were resolved in less than ~400 minutes, which is 6.6 hours. Afterwards,  we generated a plot to observe complaint types of the upper limit if the outliers. It was indicated that blocking the driveway was the most frequent complaint type. 
+
+Then, we generated a basic GGplot to observe the number of requests per status of the request through a simple bar plot.  Open requests were observed to be the highest. Furthermore, we generated a plot to observe the number of requests containing a Street Condition or a Street Light Condition complaint per each Bouruough. We observed that Queens has the highest number of Street Condition complaints, while Brooklyn has the highest Street Light Condition complaints. Then , we generated a plot to observe the most common complaint types by borough and status. In addition, we generated a cross table to observe three agencies per each request status.  Finally, we were able to identify where the complaints are concentrated by plotting a map.
