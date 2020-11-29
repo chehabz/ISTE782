@@ -331,7 +331,7 @@ CrossTable(explore3_limited$Status, explore3_limited$Agency, format = "SPSS", ex
 ### Where are the complaints which took more than 16 hours concentrated ?
 ```{r 50 - concerns}
 explore4<-dataSet1%>%filter(ResolutionTime > 1000)
-qmplot(Longitude, Latitude, data = explore4, colour = I('red'), size = I(3), darken = .3)+ facet_wrap(~ Agency)
+qmplot(Longitude, Latitude, data = explore4, colour = I('red'), size = I(3), darken = .3)
 ```
 
 
